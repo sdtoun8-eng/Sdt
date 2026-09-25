@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Crêpe 3D - Crêpe Algérie</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body {
+      background: radial-gradient(circle at center, #2C1810 0%, #150B07 100%);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    .hud {
+      position: absolute;
+      bottom: 12px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      z-index: 10;
+      padding: 0 16px;
+    }
+    .btn {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 215, 0, 0.4);
+      color: #FFF;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .btn:active, .btn.active {
+      background: #D4A373;
+      color: #2C1810;
+      border-color: #FAEDCD;
+      transform: scale(0.96);
+    }
+    .hint {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      color: rgba(255, 235, 205, 0.75);
+      font-size: 11px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div class="hint">✨ Faites glisser pour tourner en 3D</div>
+  <div id="canvas-container"></div>
+  <div class="hud">
+    <button class="btn active" id="btn-nutella" onclick="changeTopping('nutella')">🍫 Nutella</button>
+    <button class="btn" id="btn-pistache" onclick="changeTopping('pistache')">🌱 Pistache</button>
+    <button class="btn" id="btn-lotus" onclick="changeTopping('lotus')">🍪 Spéculoos</button>
+    <button class="btn" id="btn-fraise" onclick="changeTopping('fraise')">🍓 Fruits</button>
+  </div>
+
+  <script>
+    let scene, camera, renderer, crepeGroup, plateGroup, sauceMesh, toppingsGroup;
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+    let targetRotationY = 0;
+    let targetRotationX = 0.35;
+    let autoRotate = true;
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+      camera.position.set(0, 4.5, 6.5);
+      camera.lookAt(0, 0.2, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xfff5e6, 1.2);
+      scene.add(ambientLight);
+
+      const mainLight = new THREE.DirectionalLight(0xffffff, 1.4);
+      mainLight.position.set(5, 10, 7);
+      mainLight.castShadow = true;
+      mainLight.shadow.mapSize.width = 1024;
+      mainLight.shadow.mapSize.height = 1024;
+      scene.add(mainLight);
+
+      const warmFill = new THREE.PointLight(0xffaa44, 1.0, 10);
+      warmFill.position.set(-4, 3, -2);
+      scene.add(warmFill);
+
+      const rimLight = new THREE.PointLight(0xffd700, 0.8, 10);
+      rimLight.position.set(0, 2, -5);
+      scene.add(rimLight);
+
+      // Build Plate
+      plateGroup = new THREE.Group();
+      const plateGeo = new THREE.CylinderGeometry(3.6, 2.6, 0.22, 48);
+      const plateMat = new THREE.MeshStandardMaterial({
+        color: 0x1E1E24,
+        roughness: 0.3,
+        metalness: 0.1
+      });
+      const plateMesh = new THREE.Mesh(plateGeo, plateMat);
+      plateMesh.receiveShadow = true;
+      plateGroup.add(plateMesh);
+
+      // Gold Rim on Plate
+      const rimGeo = new THREE.TorusGeometry(3.55, 0.05, 16, 64);
+      const rimMat = new THREE.MeshStandardMaterial({
+        color: 0xE0A938,
+        metalness: 0.85,
+        roughness: 0.2
+      });
+      const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+      rimMesh.rotation.x = Math.PI / 2;
+      rimMesh.position.y = 0.11;
+      plateGroup.add(rimMesh);
+      scene.add(plateGroup);
+
+      // Crepe Group
+      crepeGroup = new THREE.Group();
+      crepeGroup.position.y = 0.18;
+
+      // Realistic Golden Crepe Fold (Triangle pouch geometry)
+      const crepeShape = new THREE.Shape();
+      crepeShape.moveTo(0, 2.2);
+      crepeShape.lineTo(2.3, -1.5);
+      crepeShape.quadraticCurveTo(0, -1.9, -2.3, -1.5);
+      crepeShape.closePath();
+
+      const extrudeSettings = {
+        depth: 0.22,
+        bevelEnabled: true,
+        bevelSegments: 4,
+        steps: 2,
+        bevelSize: 0.12,
+        bevelThickness: 0.12
+      };
+
+      const crepeGeo = new THREE.ExtrudeGeometry(crepeShape, extrudeSettings);
+      const crepeMat = new THREE.MeshStandardMaterial({
+        color: 0xE8B877, // Rich golden crepe color
+        roughness: 0.75,
+        metalness: 0.05
+      });
+      const crepeMesh = new THREE.Mesh(crepeGeo, crepeMat);
+      crepeMesh.rotation.x = -Math.PI / 2;
+      crepeMesh.castShadow = true;
+      crepeMesh.receiveShadow = true;
+      crepeGroup.add(crepeMesh);
+
+      // Sauce Drizzle Mesh
+      sauceMesh = createSauceMesh(0x3B1F13); // Nutella default
+      crepeGroup.add(sauceMesh);
+
+      // Toppings Group
+      toppingsGroup = new THREE.Group();
+      buildNutellaToppings();
+      crepeGroup.add(toppingsGroup);
+
+      scene.add(crepeGroup);
+
+      // Touch & Mouse Events
+      setupInteractions(container);
+
+      // Resize
+      window.addEventListener('resize', onWindowResize);
+
+      // Render Loop
+      animate();
+    }
+
+    function createSauceMesh(hexColor) {
+      const curve1 = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-1.6, 0.32, -0.6),
+        new THREE.Vector3(-0.6, 0.34, 0.4),
+        new THREE.Vector3(0.5, 0.33, -0.8),
+        new THREE.Vector3(1.4, 0.32, 0.2),
+        new THREE.Vector3(0.2, 0.33, 1.2)
+      ]);
+      const sauceGeo1 = new THREE.TubeGeometry(curve1, 40, 0.11, 10, false);
+      const sauceMat = new THREE.MeshStandardMaterial({
+        color: hexColor,
+        roughness: 0.15,
+        metalness: 0.1
+      });
+      return new THREE.Mesh(sauceGeo1, sauceMat);
+    }
+
+    function clearToppings() {
+      while (toppingsGroup.children.length > 0) {
+        toppingsGroup.remove(toppingsGroup.children[0]);
+      }
+    }
+
+    function buildNutellaToppings() {
+      clearToppings();
+      // Strawberries
+      const strawMat = new THREE.MeshStandardMaterial({ color: 0xD62828, roughness: 0.4 });
+      const greenMat = new THREE.MeshStandardMaterial({ color: 0x2D6A4F });
+      
+      const s1 = createStrawberry(strawMat, greenMat);
+      s1.position.set(-0.3, 0.45, 0.2);
+      s1.scale.set(0.6, 0.6, 0.6);
+      toppingsGroup.add(s1);
+
+      const s2 = createStrawberry(strawMat, greenMat);
+      s2.position.set(0.7, 0.45, -0.4);
+      s2.scale.set(0.55, 0.55, 0.55);
+      toppingsGroup.add(s2);
+
+      // Banana slices
+      const bananaMat = new THREE.MeshStandardMaterial({ color: 0xFDF0D5, roughness: 0.6 });
+      const b1 = createBananaSlice(bananaMat);
+      b1.position.set(-0.8, 0.36, -0.2);
+      toppingsGroup.add(b1);
+
+      const b2 = createBananaSlice(bananaMat);
+      b2.position.set(0.2, 0.36, -1.0);
+      toppingsGroup.add(b2);
+
+      // Kinder Bueno pieces
+      const buenoMat = new THREE.MeshStandardMaterial({ color: 0x4A2810, roughness: 0.5 });
+      const buenoGeo = new THREE.BoxGeometry(0.7, 0.25, 0.4);
+      const bPiece = new THREE.Mesh(buenoGeo, buenoMat);
+      bPiece.position.set(0.6, 0.4, 0.8);
+      bPiece.rotation.y = 0.4;
+      bPiece.rotation.z = 0.1;
+      toppingsGroup.add(bPiece);
+    }
+
+    function buildPistacheToppings() {
+      clearToppings();
+      const pistacheMat = new THREE.MeshStandardMaterial({ color: 0x93B267, roughness: 0.5 });
+      const pistacheGeo = new THREE.SphereGeometry(0.08, 8, 8);
+      for (let i = 0; i < 28; i++) {
+        const p = new THREE.Mesh(pistacheGeo, pistacheMat);
+        p.position.set(
+          (Math.random() - 0.5) * 2.2,
+          0.34,
+          (Math.random() - 0.5) * 2.2
+        );
+        p.scale.set(1, 0.8, 1.4);
+        toppingsGroup.add(p);
+      }
+      // White chocolate flakes
+      const whiteChocMat = new THREE.MeshStandardMaterial({ color: 0xFFF9E6, roughness: 0.3 });
+      const flakeGeo = new THREE.BoxGeometry(0.25, 0.05, 0.12);
+      for (let i = 0; i < 6; i++) {
+        const f = new THREE.Mesh(flakeGeo, whiteChocMat);
+        f.position.set((Math.random() - 0.5) * 1.6, 0.38, (Math.random() - 0.5) * 1.6);
+        f.rotation.y = Math.random() * Math.PI;
+        toppingsGroup.add(f);
+      }
+    }
+
+    function buildLotusToppings() {
+      clearToppings();
+      const lotusMat = new THREE.MeshStandardMaterial({ color: 0xC17743, roughness: 0.8 });
+      // Biscuit crumbs
+      const crumbGeo = new THREE.DodecahedronGeometry(0.09);
+      for (let i = 0; i < 20; i++) {
+        const c = new THREE.Mesh(crumbGeo, lotusMat);
+        c.position.set((Math.random() - 0.5) * 2.0, 0.34, (Math.random() - 0.5) * 2.0);
+        toppingsGroup.add(c);
+      }
+      // Whole biscuit half
+      const bisGeo = new THREE.BoxGeometry(1.2, 0.12, 0.6);
+      const biscuit = new THREE.Mesh(bisGeo, lotusMat);
+      biscuit.position.set(0.2, 0.45, 0.3);
+      biscuit.rotation.y = -0.5;
+      biscuit.rotation.z = 0.15;
+      toppingsGroup.add(biscuit);
+    }
+
+    function buildFraiseToppings() {
+      clearToppings();
+      const strawMat = new THREE.MeshStandardMaterial({ color: 0xD62828, roughness: 0.4 });
+      const greenMat = new THREE.MeshStandardMaterial({ color: 0x2D6A4F });
+      for (let i = 0; i < 4; i++) {
+        const s = createStrawberry(strawMat, greenMat);
+        s.position.set((Math.random() - 0.5) * 1.8, 0.42, (Math.random() - 0.5) * 1.8);
+        s.scale.set(0.55, 0.55, 0.55);
+        toppingsGroup.add(s);
+      }
+      // Blueberries
+      const blueMat = new THREE.MeshStandardMaterial({ color: 0x3D348B, roughness: 0.3 });
+      const blueGeo = new THREE.SphereGeometry(0.12, 10, 10);
+      for (let i = 0; i < 8; i++) {
+        const b = new THREE.Mesh(blueGeo, blueMat);
+        b.position.set((Math.random() - 0.5) * 2.0, 0.36, (Math.random() - 0.5) * 2.0);
+        toppingsGroup.add(b);
+      }
+    }
+
+    function createStrawberry(mat, leafMat) {
+      const g = new THREE.Group();
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.65, 16), mat);
+      cone.rotation.x = Math.PI;
+      g.add(cone);
+      const leaf = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 5), leafMat);
+      leaf.position.y = 0.35;
+      g.add(leaf);
+      return g;
+    }
+
+    function createBananaSlice(mat) {
+      const g = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
+      const m = new THREE.Mesh(g, mat);
+      m.rotation.x = 0.2;
+      return m;
+    }
+
+    function changeTopping(type) {
+      document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById('btn-' + type);
+      if (activeBtn) activeBtn.classList.add('active');
+
+      if (type === 'nutella') {
+        sauceMesh.material.color.setHex(0x3B1F13);
+        buildNutellaToppings();
+      } else if (type === 'pistache') {
+        sauceMesh.material.color.setHex(0x769947);
+        buildPistacheToppings();
+      } else if (type === 'lotus') {
+        sauceMesh.material.color.setHex(0xC17743);
+        buildLotusToppings();
+      } else if (type === 'fraise') {
+        sauceMesh.material.color.setHex(0xA31621);
+        buildFraiseToppings();
+      }
+    }
+
+    // Android Interface bridge
+    window.setCrepeStyle = function(type) {
+      changeTopping(type);
+    };
+
+    function setupInteractions(container) {
+      function getPos(e) {
+        if (e.touches && e.touches.length > 0) {
+          return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+        return { x: e.clientX, y: e.clientY };
+      }
+
+      function onDown(e) {
+        isDragging = true;
+        autoRotate = false;
+        previousMousePosition = getPos(e);
+      }
+
+      function onMove(e) {
+        if (!isDragging) return;
+        const pos = getPos(e);
+        const deltaX = pos.x - previousMousePosition.x;
+        const deltaY = pos.y - previousMousePosition.y;
+
+        targetRotationY += deltaX * 0.012;
+        targetRotationX = Math.max(0.1, Math.min(0.85, targetRotationX + deltaY * 0.008));
+        previousMousePosition = pos;
+      }
+
+      function onUp() {
+        isDragging = false;
+        setTimeout(() => { autoRotate = true; }, 3000);
+      }
+
+      container.addEventListener('mousedown', onDown);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+
+      container.addEventListener('touchstart', onDown, { passive: true });
+      window.addEventListener('touchmove', onMove, { passive: true });
+      window.addEventListener('touchend', onUp);
+    }
+
+    function onWindowResize() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (autoRotate && !isDragging) {
+        targetRotationY += 0.006;
+      }
+
+      // Smooth interpolation
+      crepeGroup.rotation.y += (targetRotationY - crepeGroup.rotation.y) * 0.08;
+      crepeGroup.rotation.x += (targetRotationX - crepeGroup.rotation.x) * 0.08;
+      plateGroup.rotation.y = crepeGroup.rotation.y;
+      plateGroup.rotation.x = crepeGroup.rotation.x;
+
+      renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

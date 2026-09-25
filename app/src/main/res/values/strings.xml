@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Crêpe Algérie</string>
+    <string name="slogan">La meilleure crêperie gourmande d\'Algérie</string>
+    <string name="currency">DA</string>
+    <string name="store_location">Alger, Algérie</string>
+</resources>
